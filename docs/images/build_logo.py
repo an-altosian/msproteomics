@@ -52,6 +52,7 @@ LETTER_SPACING_EM = -0.48418751 / 6.35  # from the original fragpipe SVG
 APPLE_H_EM = 0.80        # apple total height incl. stem
 APPLE_BELOW_EM = 0.02    # round-shape optical overshoot below baseline
 MARGIN_EM = 0.04         # viewBox margin
+GAP_EM = 0.035           # visual air between the apple and neighboring ink, both sides
 PADS_EM = {"fragpipe-apple": (0.030, 0.030), "msproteomics-apple": (0.045, 0.045),
            "msproteomics-apple-i": (0.045, 0.045), "msproteomics-apple-o1": (0.045, 0.055),
            "msproteomics-apple-t": (0.045, 0.045)}  # gap padding (left, right) around apple
@@ -193,15 +194,21 @@ def build(segments, pads_em):
     ls = LETTER_SPACING_EM * upem
     pen = 0.0
     text_parts, bounds, apple_parts, zone = [], [], [], None
+    ink_right = None
     prev = None
     for seg in segments:
         if seg is None:
-            pen += pads_em[0] * upem
-            apple_parts = apple_paths_at(pen)
-            zone = (pen + 0.030 * upem, pen + apple_w + 0.035 * upem)
-            bounds.append((pen, -APPLE_H_EM * upem + APPLE_BELOW_EM * upem,
-                           pen + apple_w, APPLE_BELOW_EM * upem))
-            pen += apple_w + pads_em[1] * upem
+            # place the apple a fixed GAP from the MEASURED ink edge of the previous
+            # glyph (ink overhangs the pen position: negative tracking + tiny RSB),
+            # and cut the text mask the same GAP after the apple -> equal air on both sides
+            gap = GAP_EM * upem
+            ax = (ink_right + gap) if ink_right is not None else pen + gap
+            apple_parts = apple_paths_at(ax)
+            zone = ((ink_right + 2) if ink_right is not None else ax - gap,
+                    ax + apple_w + gap)
+            bounds.append((ax, -APPLE_H_EM * upem + APPLE_BELOW_EM * upem,
+                           ax + apple_w, APPLE_BELOW_EM * upem))
+            pen = ax + apple_w + pads_em[1] * upem
             prev = None
             continue
         for ch in seg:
@@ -212,6 +219,7 @@ def build(segments, pads_em):
             b = glyph_bounds(ch, pen)
             if b:
                 bounds.append(b)
+                ink_right = b[2]
             pen += glyphset[g].width + ls
             prev = g
     x0 = min(b[0] for b in bounds)
