@@ -49,7 +49,7 @@ for fn, url in SOURCES.items():
 # ---- tunables (em fractions; bolt in the original: top=0.660 em above baseline,
 # tip 0.129 em below, height 0.790 em) ----
 LETTER_SPACING_EM = -0.48418751 / 6.35  # from the original fragpipe SVG
-APPLE_H_EM = 0.80        # apple total height incl. stem
+APPLE_CAP_OVER_EM = 0.012  # apple body (torso) overshoot above the letter cap line
 APPLE_BELOW_EM = 0.02    # round-shape optical overshoot below baseline
 MARGIN_EM = 0.04         # viewBox margin
 GAP_EM = 0.035           # visual air between the apple and neighboring ink, both sides
@@ -158,15 +158,25 @@ ax1 = max(b[2] for _, _, b in apple_src)
 ay1 = max(b[3] for _, _, b in apple_src)
 APPLE_W_SRC, APPLE_H_SRC = ax1 - ax0, ay1 - ay0
 
-k = (APPLE_H_EM * upem) / APPLE_H_SRC
+# scale so the green torso spans capline(+overshoot) .. baseline(+overshoot);
+# the stem rises above the cap line on its own
+_body = [b for _, f, b in apple_src if f == "#22ae63"]
+body_top = min(b[1] for b in _body)
+body_bot = max(b[3] for b in _body)
+_bp = BoundsPen(glyphset)
+glyphset[gname("t")].draw(_bp)
+CAPLINE = _bp.bounds[3]  # flat-topped letter, the letters' visual top
+k = (CAPLINE + APPLE_CAP_OVER_EM * upem + APPLE_BELOW_EM * upem) / (body_bot - body_top)
 apple_w = APPLE_W_SRC * k
+APPLE_TY = APPLE_BELOW_EM * upem - body_bot * k
+apple_top_y = APPLE_TY + ay0 * k  # bbox top incl. stem
+apple_bot_y = APPLE_TY + ay1 * k
 
 
 def apple_paths_at(x):
     """Apple paths scaled to APPLE_H_EM, left edge at x, bottom at baseline+overshoot."""
     tx = x - ax0 * k
-    ty = APPLE_BELOW_EM * upem - ay1 * k
-    t = Transform(k, 0, 0, k, tx, ty)
+    t = Transform(k, 0, 0, k, tx, APPLE_TY)
     parts = []
     for d, fill, _ in apple_src:
         sp = SVGPathPen({}, ntos=ntos)
@@ -206,8 +216,7 @@ def build(segments, pads_em):
             apple_parts = apple_paths_at(ax)
             zone = ((ink_right + 2) if ink_right is not None else ax - gap,
                     ax + apple_w + gap)
-            bounds.append((ax, -APPLE_H_EM * upem + APPLE_BELOW_EM * upem,
-                           ax + apple_w, APPLE_BELOW_EM * upem))
+            bounds.append((ax, apple_top_y, ax + apple_w, apple_bot_y))
             pen = ax + apple_w + pads_em[1] * upem
             prev = None
             continue
@@ -278,6 +287,6 @@ print(f"upem={upem} capHeight={capH} ({capH/upem:.3f} em)")
 print(f"kern pairs in play: { {(a,b):v for (a,b),v in KERN.items()} or 'none'}")
 print(f"apple src bbox: {ax0:.1f},{ay0:.1f} -> {ax1:.1f},{ay1:.1f}  "
       f"(w/h aspect {APPLE_W_SRC/APPLE_H_SRC:.3f}), {len(apple_src)} paths kept")
-print(f"apple placed: h={APPLE_H_EM}em w={apple_w/upem:.3f}em")
+print(f"capline={CAPLINE} body top/bot src={body_top:.1f}/{body_bot:.1f} -> apple w={apple_w/upem:.3f}em, total h={(apple_bot_y-apple_top_y)/upem:.3f}em")
 for n, s in specs.items():
     print(f"{n}: viewBox {s['w']:.0f}x{s['h']:.0f} (aspect {s['h']/s['w']:.4f})")
