@@ -52,7 +52,9 @@ LETTER_SPACING_EM = -0.48418751 / 6.35  # from the original fragpipe SVG
 APPLE_H_EM = 0.80        # apple total height incl. stem
 APPLE_BELOW_EM = 0.02    # round-shape optical overshoot below baseline
 MARGIN_EM = 0.04         # viewBox margin
-PADS_EM = {"fragpipe-apple": 0.030, "msproteomics-apple": 0.045}  # gap padding around apple
+PADS_EM = {"fragpipe-apple": (0.030, 0.030), "msproteomics-apple": (0.045, 0.045),
+           "msproteomics-apple-i": (0.045, 0.045), "msproteomics-apple-o1": (0.045, 0.055),
+           "msproteomics-apple-t": (0.045, 0.045)}  # gap padding (left, right) around apple
 
 TEXT_LIGHT = "#3c3c3c"
 TEXT_DARK = "#fafafa"
@@ -66,6 +68,9 @@ ntos = lambda v: f"{v:.1f}"
 VARIANTS = {
     "fragpipe-apple": ["Fr", None, "gPipe"],
     "msproteomics-apple": ["msprote", None, "mics"],
+    "msproteomics-apple-i": ["msproteom", None, "cs"],
+    "msproteomics-apple-o1": ["mspr", None, "teomics"],
+    "msproteomics-apple-t": ["mspro", None, "eomics"],
 }
 for segs in VARIANTS.values():
     for seg in segs:
@@ -184,18 +189,19 @@ def glyph_bounds(ch, penx):
     return bp.bounds
 
 
-def build(segments, pad_em):
+def build(segments, pads_em):
     ls = LETTER_SPACING_EM * upem
     pen = 0.0
-    text_parts, bounds, apple_parts = [], [], []
+    text_parts, bounds, apple_parts, zone = [], [], [], None
     prev = None
     for seg in segments:
         if seg is None:
-            pen += pad_em * upem
+            pen += pads_em[0] * upem
             apple_parts = apple_paths_at(pen)
+            zone = (pen + 0.030 * upem, pen + apple_w + 0.035 * upem)
             bounds.append((pen, -APPLE_H_EM * upem + APPLE_BELOW_EM * upem,
                            pen + apple_w, APPLE_BELOW_EM * upem))
-            pen += apple_w + pad_em * upem
+            pen += apple_w + pads_em[1] * upem
             prev = None
             continue
         for ch in seg:
@@ -212,18 +218,32 @@ def build(segments, pad_em):
     y0 = min(b[1] for b in bounds)
     x1 = max(b[2] for b in bounds)
     y1 = max(b[3] for b in bounds)
-    return text_parts, apple_parts, (x0, y0, x1, y1)
+    return text_parts, apple_parts, (x0, y0, x1, y1), zone
 
 
-def emit(name, text_parts, apple_parts, bbox, fill):
+def emit(name, text_parts, apple_parts, bbox, fill, zone=None):
     m = MARGIN_EM * upem
     x0, y0, x1, y1 = bbox
     vb = (x0 - m, y0 - m, (x1 - x0) + 2 * m, (y1 - y0) + 2 * m)
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vb[0]:.1f} {vb[1]:.1f} {vb[2]:.1f} {vb[3]:.1f}">',
-        f'  <g fill="{fill}">',
     ]
+    maskref = ""
+    if zone:
+        # keep-out slot: glyph speed-dash tails have negative LSB and would thread
+        # behind the apple's stem; erase text ink in the slot, cut at the letter lean
+        t = 0.2126  # tan(12 deg)
+        yt, yb = vb[1], vb[1] + vb[3]
+        zx0, zx1 = zone
+        pts = (f"{zx0 - t*yt:.1f},{yt:.1f} {zx1 - t*yt:.1f},{yt:.1f} "
+               f"{zx1 - t*yb:.1f},{yb:.1f} {zx0 - t*yb:.1f},{yb:.1f}")
+        lines += ['  <defs><mask id="slot">',
+                  f'    <rect x="{vb[0]:.1f}" y="{vb[1]:.1f}" width="{vb[2]:.1f}" height="{vb[3]:.1f}" fill="#fff"/>',
+                  f'    <polygon points="{pts}" fill="#000"/>',
+                  '  </mask></defs>']
+        maskref = ' mask="url(#slot)"'
+    lines.append(f'  <g fill="{fill}"{maskref}>')
     lines += [f'    <path d="{d}"/>' for d in text_parts]
     lines.append("  </g>")
     lines.append("  <g>")
@@ -237,9 +257,9 @@ def emit(name, text_parts, apple_parts, bbox, fill):
 
 specs = {}
 for name, segs in VARIANTS.items():
-    tp, ap, bbox = build(segs, PADS_EM[name])
+    tp, ap, bbox, zone = build(segs, PADS_EM[name])
     for theme, fill in (("light", TEXT_LIGHT), ("dark", TEXT_DARK)):
-        vb = emit(f"{name}_{theme}", tp, ap, bbox, fill)
+        vb = emit(f"{name}_{theme}", tp, ap, bbox, fill, zone)
         specs[f"{name}_{theme}"] = {"w": vb[2], "h": vb[3]}
 
 with open(os.path.join(OUT, "specs.json"), "w") as fh:
